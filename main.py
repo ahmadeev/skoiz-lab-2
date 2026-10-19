@@ -14,7 +14,7 @@ cap.release()
 if not success1 or not success2:
     raise RuntimeError("Не удалось прочитать кадры")
 
-orb = cv2.ORB_create(nfeatures=1000)
+orb = cv2.SIFT_create(nfeatures=1000)
 
 kp1, des1 = orb.detectAndCompute(
     cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY), None
@@ -27,7 +27,7 @@ kp2, des2 = orb.detectAndCompute(
 if des1 is None or des2 is None:
     raise RuntimeError("Дескрипторы не найдены")
 
-matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+matcher = cv2.BFMatcher(cv2.NORM_L2)
 matches = matcher.knnMatch(des1, des2, k=2)
 
 good_matches = []
