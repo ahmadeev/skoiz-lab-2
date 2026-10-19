@@ -69,17 +69,36 @@ inlier_matches = [
     if is_inlier
 ]
 
-result = cv2.drawMatches(
-    reference, kp1,
-    frame, kp2,
-    inlier_matches[:50],
-    None,
-    flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+height, width = reference.shape[:2]
+
+corners = np.float32([
+    [0, 0],
+    [width - 1, 0],
+    [width - 1, height - 1],
+    [0, height - 1]
+]).reshape(-1, 1, 2)
+
+projected = cv2.perspectiveTransform(corners, H)
+
+cv2.polylines(
+    frame,
+    [np.int32(projected)],
+    isClosed=True,
+    color=(0, 255, 0),
+    thickness=3
 )
 
-cv2.imwrite("ransac_matches.jpg", result)
+x, y = projected[0, 0].astype(int)
 
-print(f"Соответствий после BFMatcher: {len(good_matches)}")
-print(f"Inliers: {len(inlier_matches)}")
-print(f"Outliers: {len(good_matches) - len(inlier_matches)}")
-print(f"Доля inliers: {len(inlier_matches) / len(good_matches):.1%}")
+cv2.putText(
+    frame,
+    "Object",
+    (x, max(20, y - 10)),
+    cv2.FONT_HERSHEY_SIMPLEX,
+    0.7,
+    (0, 255, 0),
+    2
+)
+
+cv2.imwrite("tracked_frame.jpg", frame)
+
