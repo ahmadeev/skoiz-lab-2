@@ -91,12 +91,35 @@ def detect_object(frame):
     if H is None or mask is None:
         return None
 
-    if np.count_nonzero(mask) < 8:
+    inliers = np.count_nonzero(mask)
+
+    if inliers < 10 or inliers / len(good_matches) < 0.5:
         return None
 
     projected = cv2.perspectiveTransform(corners, H)
 
     if not np.isfinite(projected).all():
+        return None
+
+    quad = projected.reshape(4, 2)
+
+    if not cv2.isContourConvex(quad):
+        return None
+
+    area = cv2.contourArea(quad)
+    frame_area = width * height
+
+    if not 0.005 * frame_area <= area <= 1.2 * frame_area:
+        return None
+
+    x, y = quad[:, 0], quad[:, 1]
+
+    if (
+            (x < -0.2 * width).any()
+            or (x > 1.2 * width).any()
+            or (y < -0.2 * height).any()
+            or (y > 1.2 * height).any()
+    ):
         return None
 
     return projected
