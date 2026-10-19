@@ -1,11 +1,12 @@
 import cv2
+import numpy as np
 
 
 cap = cv2.VideoCapture("test-videos/mona-lisa.avi")
 
 success1, reference = cap.read()
 
-cap.set(cv2.CAP_PROP_POS_FRAMES, 30)
+cap.set(cv2.CAP_PROP_POS_FRAMES, 120)
 success2, frame = cap.read()
 
 cap.release()
@@ -42,17 +43,43 @@ for pair in matches:
 
 good_matches.sort(key=lambda m: m.distance)
 
+if len(good_matches) < 4:
+    raise RuntimeError("Недостаточно соответствий для RANSAC")
+
+src_points = np.float32([
+    kp1[m.queryIdx].pt for m in good_matches
+]).reshape(-1, 1, 2)
+
+dst_points = np.float32([
+    kp2[m.trainIdx].pt for m in good_matches
+]).reshape(-1, 1, 2)
+
+H, mask = cv2.findHomography(
+    src_points,
+    dst_points,
+    cv2.RANSAC,
+    ransacReprojThreshold=5.0
+)
+
+if H is None or mask is None:
+    raise RuntimeError("Не удалось вычислить гомографию")
+
+inlier_matches = [
+    m for m, is_inlier in zip(good_matches, mask.ravel())
+    if is_inlier
+]
+
 result = cv2.drawMatches(
     reference, kp1,
     frame, kp2,
-    good_matches[:50],
+    inlier_matches[:50],
     None,
     flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
 )
 
-cv2.imwrite("matches.jpg", result)
+cv2.imwrite("ransac_matches.jpg", result)
 
-print(f"Точек на эталоне: {len(kp1)}")
-print(f"Точек на кадре: {len(kp2)}")
-print(f"Всего соответствий: {len(matches)}")
-print(f"После фильтрации: {len(good_matches)}")
+print(f"Соответствий после BFMatcher: {len(good_matches)}")
+print(f"Inliers: {len(inlier_matches)}")
+print(f"Outliers: {len(good_matches) - len(inlier_matches)}")
+print(f"Доля inliers: {len(inlier_matches) / len(good_matches):.1%}")
