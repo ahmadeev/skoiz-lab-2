@@ -1,3 +1,4 @@
 *.jpg
+!docs/images/*.jpg
 *.mp4
 notes.md
