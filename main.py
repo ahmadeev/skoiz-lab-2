@@ -20,6 +20,8 @@ FRAME_MARGIN_RATIO = 0.2
 
 BOX_COLOR = (0, 255, 0)
 BOX_THICKNESS = 3
+POINT_COLOR = (0, 0, 255)
+POINT_RADIUS = 3
 LABEL = "Object"
 LABEL_FONT_SCALE = 0.7
 LABEL_THICKNESS = 2
@@ -153,17 +155,33 @@ try:
         ):
             return None
 
-        return projected
+        inlier_points = [
+            kp2[m.trainIdx].pt
+            for m, valid in zip(good_matches, mask.ravel())
+            if valid
+        ]
+
+        return projected, inlier_points
 
     processed = 0
     detected = 0
     frame = reference
 
     while True:
-        projected = detect_object(frame)
+        detection = detect_object(frame)
 
-        if projected is not None:
+        if detection is not None:
+            projected, points = detection
             detected += 1
+
+            for x, y in points:
+                cv2.circle(
+                    frame,
+                    (int(x), int(y)),
+                    POINT_RADIUS,
+                    POINT_COLOR,
+                    -1
+                )
 
             cv2.polylines(
                 frame,
