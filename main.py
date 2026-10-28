@@ -270,6 +270,31 @@ def print_processing_stats(
     print(f"Результат: {output_video}")
 
 
+def format_tracking_table(
+    results: Sequence[tuple[str | Path, ProcessingStats]],
+) -> str:
+    """Формирует Markdown-таблицу с результатами трекинга."""
+    lines = [
+        "| Видео | Кадров | По эталону | По предыдущему состоянию | Доля обнаружений |",
+        "|---|---:|---:|---:|---:|",
+    ]
+
+    for input_video, stats in results:
+        name = Path(input_video).name
+
+        if name == "video.avi":
+            name = "Собственное видео"
+
+        lines.append(
+            f"| {name} | {stats.processed_frames} | "
+            f"{stats.reference_detections} | "
+            f"{stats.previous_state_detections} | "
+            f"{stats.detection_rate:.1%} |"
+        )
+
+    return "\n".join(lines)
+
+
 def process_video(
     input_video: str | Path,
     feature_detector,
@@ -397,15 +422,19 @@ def process_videos(input_videos: Sequence[str | Path]) -> None:
     feature_detector = cv2.SIFT_create(nfeatures=SIFT_FEATURES)
     matcher = cv2.BFMatcher(cv2.NORM_L2)
     detection_config = DetectionConfig()
+    results = []
 
     for input_video in input_videos:
         print(f"\nОбработка видео: {input_video}")
-        process_video(
+        stats = process_video(
             input_video,
             feature_detector,
             matcher,
             detection_config,
         )
+        results.append((input_video, stats))
+
+    print(f"\n{format_tracking_table(results)}")
 
 
 if __name__ == "__main__":
