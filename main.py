@@ -8,11 +8,13 @@ import cv2
 import numpy as np
 
 
+VIDEO_INPUT_DIR = Path("test-videos/input")
+VIDEO_OUTPUT_DIR = Path("test-videos/output")
 INPUT_VIDEOS = [
-    "test-videos/mona-lisa.avi",
-    # "test-videos/mona-lisa-blur.avi",
-    # "test-videos/mona-lisa-blur-extra-credit.avi",
-    # "test-videos/video.avi",
+    VIDEO_INPUT_DIR / "mona-lisa.avi",
+    # VIDEO_INPUT_DIR / "mona-lisa-blur.avi",
+    # VIDEO_INPUT_DIR / "mona-lisa-blur-extra-credit.avi",
+    # VIDEO_INPUT_DIR / "simple_track.avi",
 ]
 VIDEO_CODEC = "mp4v"
 SIFT_FEATURES = 1000
@@ -275,7 +277,7 @@ def process_video(
     detection_config: DetectionConfig,
 ) -> ProcessingStats:
     """Выполняет полный цикл обработки одного видео."""
-    output_video = f"tracked_{Path(input_video).stem}.mp4"
+    output_video = VIDEO_OUTPUT_DIR / f"tracked_{Path(input_video).stem}.mp4"
     capture = cv2.VideoCapture(str(input_video))
     writer = None
     stats = ProcessingStats()
@@ -302,7 +304,7 @@ def process_video(
 
         fourcc = cv2.VideoWriter_fourcc(*VIDEO_CODEC)
         writer = cv2.VideoWriter(
-            output_video, fourcc, fps, frame_size
+            str(output_video), fourcc, fps, frame_size
         )
 
         if not writer.isOpened():
