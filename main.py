@@ -17,7 +17,7 @@ INPUT_VIDEOS = [
 VIDEO_CODEC = "mp4v"
 SIFT_FEATURES = 1000
 
-BOX_COLOR = (0, 255, 0)
+BOX_COLOR = (0, 255, 0) # BGR
 BOX_THICKNESS = 3
 POINT_COLOR = (0, 0, 255)
 POINT_RADIUS = 3
@@ -60,10 +60,12 @@ class ProcessingStats:
 
     @property
     def total_detections(self) -> int:
+        """Возвращает общее количество успешных обнаружений."""
         return self.reference_detections + self.previous_state_detections
 
     @property
     def detection_rate(self) -> float:
+        """Вычисляет долю кадров с обнаруженным объектом."""
         if self.processed_frames == 0:
             return 0.0
 
@@ -71,6 +73,7 @@ class ProcessingStats:
 
 
 def extract_features(frame: np.ndarray, feature_detector) -> FrameFeatures:
+    """Извлекает ключевые точки и дескрипторы из кадра."""
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     keypoints, descriptors = feature_detector.detectAndCompute(
         gray_frame, None
@@ -86,6 +89,7 @@ def detect_object(
     frame_size: tuple[int, int],
     config: DetectionConfig,
 ) -> DetectionResult | None:
+    """Обнаруживает объект на кадре по признакам выбранного источника."""
     if (
         source_features.descriptors is None
         or target_features.descriptors is None
@@ -186,6 +190,7 @@ def select_object_features(
     projected_corners: np.ndarray,
     min_matches: int,
 ) -> FrameFeatures | None:
+    """Отбирает признаки объекта для отслеживания на следующем кадре."""
     if features.descriptors is None:
         return None
 
@@ -207,6 +212,7 @@ def select_object_features(
 
 
 def draw_detection(frame: np.ndarray, detection: DetectionResult) -> None:
+    """Наносит результат обнаружения объекта на кадр."""
     for x_coordinate, y_coordinate in detection.inlier_points:
         cv2.circle(
             frame,
@@ -245,6 +251,7 @@ def print_processing_stats(
     stats: ProcessingStats,
     output_video: str | Path,
 ) -> None:
+    """Выводит итоговую статистику обработки видео."""
     print(f"Обработано кадров: {stats.processed_frames}")
     print(f"Обнаружено по эталону: {stats.reference_detections}")
     print(
@@ -262,6 +269,7 @@ def process_video(
     matcher,
     detection_config: DetectionConfig,
 ) -> ProcessingStats:
+    """Выполняет полный цикл обработки одного видео."""
     output_video = f"tracked_{Path(input_video).stem}.mp4"
     capture = cv2.VideoCapture(str(input_video))
     writer = None
@@ -376,6 +384,7 @@ def process_video(
 
 
 def process_videos(input_videos: Sequence[str | Path]) -> None:
+    """Последовательно запускает обработку набора видео."""
     feature_detector = cv2.SIFT_create(nfeatures=SIFT_FEATURES)
     matcher = cv2.BFMatcher(cv2.NORM_L2)
     detection_config = DetectionConfig()
