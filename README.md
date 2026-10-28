@@ -42,10 +42,22 @@ SIFT позволяет находить признаки, устойчивые 
 
 ## Результаты работы и тестирования системы
 
-![](./docs/images/keypoints.jpg)
-![](./docs/images/matches.jpg)
-![](./docs/images/ransac_matches.jpg)
-![](./docs/images/tracked_frame.jpg)
+<figure>
+  <img src="./docs/images/keypoints.jpg" alt="Описание фото для поисковиков">
+  <figcaption>Это подпись под фотографией</figcaption>
+</figure>
+<figure>
+  <img src="./docs/images/matches.jpg" alt="Описание фото для поисковиков">
+  <figcaption>Это подпись под фотографией</figcaption>
+</figure>
+<figure>
+  <img src="./docs/images/ransac_matches.jpg" alt="Описание фото для поисковиков">
+  <figcaption>Это подпись под фотографией</figcaption>
+</figure>
+<figure>
+  <img src="./docs/images/tracked_frame.jpg" alt="Описание фото для поисковиков">
+  <figcaption>Это подпись под фотографией</figcaption>
+</figure>
 
 <!-- TRACKING TABLE START -->
 
