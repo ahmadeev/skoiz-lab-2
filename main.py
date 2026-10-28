@@ -1,4 +1,8 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 import cv2
 import numpy as np
@@ -6,22 +10,12 @@ import numpy as np
 
 INPUT_VIDEOS = [
     "test-videos/mona-lisa.avi",
-    "test-videos/mona-lisa-blur.avi",
-    "test-videos/mona-lisa-blur-extra-credit.avi",
+    # "test-videos/mona-lisa-blur.avi",
+    # "test-videos/mona-lisa-blur-extra-credit.avi",
+    # "test-videos/video.avi",
 ]
 VIDEO_CODEC = "mp4v"
-
 SIFT_FEATURES = 1000
-KNN_NEIGHBORS = 2
-LOWE_RATIO = 0.75
-MIN_MATCHES = 10
-MIN_INLIERS = 10
-MIN_INLIER_RATIO = 0.5
-RANSAC_REPROJECTION_THRESHOLD = 5.0
-
-MIN_AREA_RATIO = 0.005
-MAX_AREA_RATIO = 1.2
-FRAME_MARGIN_RATIO = 0.2
 
 BOX_COLOR = (0, 255, 0)
 BOX_THICKNESS = 3
@@ -34,24 +28,259 @@ LABEL_MIN_Y = 20
 LABEL_Y_OFFSET = 10
 
 
-def process_video(input_video):
+@dataclass(frozen=True)
+class DetectionConfig:
+    lowe_ratio: float = 0.75
+    min_matches: int = 10
+    min_inliers: int = 10
+    min_inlier_ratio: float = 0.5
+    ransac_reprojection_threshold: float = 5.0
+    min_area_ratio: float = 0.005
+    max_area_ratio: float = 1.2
+    frame_margin_ratio: float = 0.2
+
+
+@dataclass(frozen=True)
+class FrameFeatures:
+    keypoints: Sequence[cv2.KeyPoint]
+    descriptors: np.ndarray | None
+
+
+@dataclass(frozen=True)
+class DetectionResult:
+    projected_corners: np.ndarray
+    inlier_points: list[tuple[float, float]]
+
+
+@dataclass
+class ProcessingStats:
+    processed_frames: int = 0
+    reference_detections: int = 0
+    previous_state_detections: int = 0
+
+    @property
+    def total_detections(self) -> int:
+        return self.reference_detections + self.previous_state_detections
+
+    @property
+    def detection_rate(self) -> float:
+        if self.processed_frames == 0:
+            return 0.0
+
+        return self.total_detections / self.processed_frames
+
+
+def extract_features(frame: np.ndarray, feature_detector) -> FrameFeatures:
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    keypoints, descriptors = feature_detector.detectAndCompute(
+        gray_frame, None
+    )
+    return FrameFeatures(keypoints, descriptors)
+
+
+def detect_object(
+    source_features: FrameFeatures,
+    source_corners: np.ndarray,
+    target_features: FrameFeatures,
+    matcher,
+    frame_size: tuple[int, int],
+    config: DetectionConfig,
+) -> DetectionResult | None:
+    if (
+        source_features.descriptors is None
+        or target_features.descriptors is None
+    ):
+        return None
+
+    matches = matcher.knnMatch(
+        source_features.descriptors,
+        target_features.descriptors,
+        k=2,
+    )
+    good_matches = []
+
+    for pair in matches:
+        if len(pair) < 2:
+            continue
+
+        first_match, second_match = pair[:2]
+
+        if first_match.distance < config.lowe_ratio * second_match.distance:
+            good_matches.append(first_match)
+
+    if len(good_matches) < config.min_matches:
+        return None
+
+    source_points = np.float32([
+        source_features.keypoints[match.queryIdx].pt
+        for match in good_matches
+    ]).reshape(-1, 1, 2)
+    target_points = np.float32([
+        target_features.keypoints[match.trainIdx].pt
+        for match in good_matches
+    ]).reshape(-1, 1, 2)
+
+    homography, mask = cv2.findHomography(
+        source_points,
+        target_points,
+        cv2.RANSAC,
+        ransacReprojThreshold=config.ransac_reprojection_threshold,
+    )
+
+    if homography is None or mask is None:
+        return None
+
+    inliers = np.count_nonzero(mask)
+
+    if (
+        inliers < config.min_inliers
+        or inliers / len(good_matches) < config.min_inlier_ratio
+    ):
+        return None
+
+    projected_corners = cv2.perspectiveTransform(
+        source_corners, homography
+    )
+
+    if not np.isfinite(projected_corners).all():
+        return None
+
+    quadrilateral = projected_corners.reshape(4, 2)
+
+    if not cv2.isContourConvex(quadrilateral):
+        return None
+
+    width, height = frame_size
+    area = cv2.contourArea(quadrilateral)
+    frame_area = width * height
+
+    if not (
+        config.min_area_ratio * frame_area
+        <= area
+        <= config.max_area_ratio * frame_area
+    ):
+        return None
+
+    x_coordinates = quadrilateral[:, 0]
+    y_coordinates = quadrilateral[:, 1]
+    max_coordinate_ratio = 1 + config.frame_margin_ratio
+
+    if (
+        (x_coordinates < -config.frame_margin_ratio * width).any()
+        or (x_coordinates > max_coordinate_ratio * width).any()
+        or (y_coordinates < -config.frame_margin_ratio * height).any()
+        or (y_coordinates > max_coordinate_ratio * height).any()
+    ):
+        return None
+
+    inlier_points = [
+        target_features.keypoints[match.trainIdx].pt
+        for match, valid in zip(good_matches, mask.ravel())
+        if valid
+    ]
+    return DetectionResult(projected_corners, inlier_points)
+
+
+def select_object_features(
+    features: FrameFeatures,
+    projected_corners: np.ndarray,
+    min_matches: int,
+) -> FrameFeatures | None:
+    if features.descriptors is None:
+        return None
+
+    contour = projected_corners.reshape(-1, 2).astype(np.float32)
+    indexes = [
+        index
+        for index, keypoint in enumerate(features.keypoints)
+        if cv2.pointPolygonTest(
+            contour, keypoint.pt, measureDist=False
+        ) >= 0
+    ]
+
+    if len(indexes) < min_matches:
+        return None
+
+    keypoints = [features.keypoints[index] for index in indexes]
+    descriptors = features.descriptors[indexes]
+    return FrameFeatures(keypoints, descriptors)
+
+
+def draw_detection(frame: np.ndarray, detection: DetectionResult) -> None:
+    for x_coordinate, y_coordinate in detection.inlier_points:
+        cv2.circle(
+            frame,
+            (int(x_coordinate), int(y_coordinate)),
+            POINT_RADIUS,
+            POINT_COLOR,
+            -1,
+        )
+
+    cv2.polylines(
+        frame,
+        [np.int32(detection.projected_corners)],
+        isClosed=True,
+        color=BOX_COLOR,
+        thickness=BOX_THICKNESS,
+    )
+
+    x_coordinate, y_coordinate = detection.projected_corners[0, 0].astype(
+        int
+    )
+    cv2.putText(
+        frame,
+        LABEL,
+        (
+            x_coordinate,
+            max(LABEL_MIN_Y, y_coordinate - LABEL_Y_OFFSET),
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        LABEL_FONT_SCALE,
+        BOX_COLOR,
+        LABEL_THICKNESS,
+    )
+
+
+def print_processing_stats(
+    stats: ProcessingStats,
+    output_video: str | Path,
+) -> None:
+    print(f"Обработано кадров: {stats.processed_frames}")
+    print(f"Обнаружено по эталону: {stats.reference_detections}")
+    print(
+        "Обнаружено по предыдущему состоянию: "
+        f"{stats.previous_state_detections}"
+    )
+    print(f"Всего обнаружений: {stats.total_detections}")
+    print(f"Доля обнаружений: {stats.detection_rate:.1%}")
+    print(f"Результат: {output_video}")
+
+
+def process_video(
+    input_video: str | Path,
+    feature_detector,
+    matcher,
+    detection_config: DetectionConfig,
+) -> ProcessingStats:
     output_video = f"tracked_{Path(input_video).stem}.mp4"
-    cap = cv2.VideoCapture(input_video)
+    capture = cv2.VideoCapture(str(input_video))
     writer = None
+    stats = ProcessingStats()
 
     try:
-        if not cap.isOpened():
+        if not capture.isOpened():
             raise RuntimeError(f"Не удалось открыть видео: {input_video}")
 
-        success, reference = cap.read()
+        success, reference_frame = capture.read()
 
         if not success:
             raise RuntimeError(
                 f"Не удалось прочитать первый кадр: {input_video}"
             )
 
-        height, width = reference.shape[:2]
-        fps = cap.get(cv2.CAP_PROP_FPS)
+        height, width = reference_frame.shape[:2]
+        frame_size = (width, height)
+        fps = capture.get(cv2.CAP_PROP_FPS)
 
         if fps <= 0:
             raise RuntimeError(
@@ -60,7 +289,7 @@ def process_video(input_video):
 
         fourcc = cv2.VideoWriter_fourcc(*VIDEO_CODEC)
         writer = cv2.VideoWriter(
-            output_video, fourcc, fps, (width, height)
+            output_video, fourcc, fps, frame_size
         )
 
         if not writer.isOpened():
@@ -68,178 +297,97 @@ def process_video(input_video):
                 f"Не удалось создать выходное видео: {output_video}"
             )
 
-        sift = cv2.SIFT_create(nfeatures=SIFT_FEATURES)
-        kp1, des1 = sift.detectAndCompute(
-            cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY), None
+        reference_features = extract_features(
+            reference_frame, feature_detector
         )
 
-        if des1 is None:
+        if reference_features.descriptors is None:
             raise RuntimeError(
                 f"На эталоне не найдены дескрипторы: {input_video}"
             )
 
-        matcher = cv2.BFMatcher(cv2.NORM_L2)
-
-        corners = np.float32([
+        reference_corners = np.float32([
             [0, 0],
             [width - 1, 0],
             [width - 1, height - 1],
-            [0, height - 1]
+            [0, height - 1],
         ]).reshape(-1, 1, 2)
 
-        def detect_object(frame):
-            kp2, des2 = sift.detectAndCompute(
-                cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), None
-            )
-
-            if des2 is None:
-                return None
-
-            matches = matcher.knnMatch(
-                des1, des2, k=KNN_NEIGHBORS
-            )
-
-            good_matches = []
-
-            for pair in matches:
-                if len(pair) < KNN_NEIGHBORS:
-                    continue
-
-                m, n = pair
-
-                if m.distance < LOWE_RATIO * n.distance:
-                    good_matches.append(m)
-
-            if len(good_matches) < MIN_MATCHES:
-                return None
-
-            src_points = np.float32([
-                kp1[m.queryIdx].pt for m in good_matches
-            ]).reshape(-1, 1, 2)
-
-            dst_points = np.float32([
-                kp2[m.trainIdx].pt for m in good_matches
-            ]).reshape(-1, 1, 2)
-
-            H, mask = cv2.findHomography(
-                src_points,
-                dst_points,
-                cv2.RANSAC,
-                ransacReprojThreshold=RANSAC_REPROJECTION_THRESHOLD
-            )
-
-            if H is None or mask is None:
-                return None
-
-            inliers = np.count_nonzero(mask)
-
-            if (
-                inliers < MIN_INLIERS
-                or inliers / len(good_matches) < MIN_INLIER_RATIO
-            ):
-                return None
-
-            projected = cv2.perspectiveTransform(corners, H)
-
-            if not np.isfinite(projected).all():
-                return None
-
-            quad = projected.reshape(4, 2)
-
-            if not cv2.isContourConvex(quad):
-                return None
-
-            area = cv2.contourArea(quad)
-            frame_area = width * height
-
-            if not (
-                MIN_AREA_RATIO * frame_area
-                <= area
-                <= MAX_AREA_RATIO * frame_area
-            ):
-                return None
-
-            x, y = quad[:, 0], quad[:, 1]
-            max_coordinate_ratio = 1 + FRAME_MARGIN_RATIO
-
-            if (
-                (x < -FRAME_MARGIN_RATIO * width).any()
-                or (x > max_coordinate_ratio * width).any()
-                or (y < -FRAME_MARGIN_RATIO * height).any()
-                or (y > max_coordinate_ratio * height).any()
-            ):
-                return None
-
-            inlier_points = [
-                kp2[m.trainIdx].pt
-                for m, valid in zip(good_matches, mask.ravel())
-                if valid
-            ]
-
-            return projected, inlier_points
-
-        processed = 0
-        detected = 0
-        frame = reference
+        frame = reference_frame
+        previous_features = None
+        previous_corners = None
 
         while True:
-            detection = detect_object(frame)
+            frame_features = extract_features(frame, feature_detector)
+            detection = detect_object(
+                reference_features,
+                reference_corners,
+                frame_features,
+                matcher,
+                frame_size,
+                detection_config,
+            )
 
             if detection is not None:
-                projected, points = detection
-                detected += 1
-
-                for x, y in points:
-                    cv2.circle(
-                        frame,
-                        (int(x), int(y)),
-                        POINT_RADIUS,
-                        POINT_COLOR,
-                        -1
-                    )
-
-                cv2.polylines(
-                    frame,
-                    [np.int32(projected)],
-                    isClosed=True,
-                    color=BOX_COLOR,
-                    thickness=BOX_THICKNESS
+                stats.reference_detections += 1
+            elif (
+                previous_features is not None
+                and previous_corners is not None
+            ):
+                detection = detect_object(
+                    previous_features,
+                    previous_corners,
+                    frame_features,
+                    matcher,
+                    frame_size,
+                    detection_config,
                 )
 
-                x, y = projected[0, 0].astype(int)
+                if detection is not None:
+                    stats.previous_state_detections += 1
 
-                cv2.putText(
-                    frame,
-                    LABEL,
-                    (x, max(LABEL_MIN_Y, y - LABEL_Y_OFFSET)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    LABEL_FONT_SCALE,
-                    BOX_COLOR,
-                    LABEL_THICKNESS
+            if detection is not None:
+                object_features = select_object_features(
+                    frame_features,
+                    detection.projected_corners,
+                    detection_config.min_matches,
                 )
+
+                if object_features is not None:
+                    previous_features = object_features
+                    previous_corners = detection.projected_corners
+
+                draw_detection(frame, detection)
 
             writer.write(frame)
-            processed += 1
-
-            success, frame = cap.read()
+            stats.processed_frames += 1
+            success, frame = capture.read()
 
             if not success:
                 break
     finally:
-        cap.release()
+        capture.release()
+
         if writer is not None:
             writer.release()
 
-    print(f"Обработано кадров: {processed}")
-    print(f"Объект обнаружен на: {detected}")
-    print(f"Доля обнаружений: {detected / processed:.1%}")
-    print(f"Результат: {output_video}")
+    print_processing_stats(stats, output_video)
+    return stats
 
 
-def process_videos(input_videos):
+def process_videos(input_videos: Sequence[str | Path]) -> None:
+    feature_detector = cv2.SIFT_create(nfeatures=SIFT_FEATURES)
+    matcher = cv2.BFMatcher(cv2.NORM_L2)
+    detection_config = DetectionConfig()
+
     for input_video in input_videos:
         print(f"\nОбработка видео: {input_video}")
-        process_video(input_video)
+        process_video(
+            input_video,
+            feature_detector,
+            matcher,
+            detection_config,
+        )
 
 
 if __name__ == "__main__":
