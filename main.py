@@ -17,7 +17,8 @@ INPUT_VIDEOS = [
 VIDEO_CODEC = "mp4v"
 SIFT_FEATURES = 1000
 
-BOX_COLOR = (0, 255, 0) # BGR
+REFERENCE_BOX_COLOR = (0, 255, 0)  # BGR
+PREVIOUS_BOX_COLOR = (0, 165, 255)  # BGR
 BOX_THICKNESS = 3
 POINT_COLOR = (0, 0, 255)
 POINT_RADIUS = 3
@@ -211,7 +212,11 @@ def select_object_features(
     return FrameFeatures(keypoints, descriptors)
 
 
-def draw_detection(frame: np.ndarray, detection: DetectionResult) -> None:
+def draw_detection(
+    frame: np.ndarray,
+    detection: DetectionResult,
+    box_color: tuple[int, int, int],
+) -> None:
     """Наносит результат обнаружения объекта на кадр."""
     for x_coordinate, y_coordinate in detection.inlier_points:
         cv2.circle(
@@ -226,7 +231,7 @@ def draw_detection(frame: np.ndarray, detection: DetectionResult) -> None:
         frame,
         [np.int32(detection.projected_corners)],
         isClosed=True,
-        color=BOX_COLOR,
+        color=box_color,
         thickness=BOX_THICKNESS,
     )
 
@@ -242,7 +247,7 @@ def draw_detection(frame: np.ndarray, detection: DetectionResult) -> None:
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         LABEL_FONT_SCALE,
-        BOX_COLOR,
+        box_color,
         LABEL_THICKNESS,
     )
 
@@ -327,6 +332,7 @@ def process_video(
 
         while True:
             frame_features = extract_features(frame, feature_detector)
+            box_color = REFERENCE_BOX_COLOR
             detection = detect_object(
                 reference_features,
                 reference_corners,
@@ -353,6 +359,7 @@ def process_video(
 
                 if detection is not None:
                     stats.previous_state_detections += 1
+                    box_color = PREVIOUS_BOX_COLOR
 
             if detection is not None:
                 object_features = select_object_features(
@@ -365,7 +372,7 @@ def process_video(
                     previous_features = object_features
                     previous_corners = detection.projected_corners
 
-                draw_detection(frame, detection)
+                draw_detection(frame, detection, box_color)
 
             writer.write(frame)
             stats.processed_frames += 1
