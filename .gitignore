@@ -1,4 +1,6 @@
 *.jpg
 !docs/images/*.jpg
 *.mp4
+*.gif
 notes.md
+to-gif.ps1

@@ -11,10 +11,10 @@ import numpy as np
 VIDEO_INPUT_DIR = Path("test-videos/input")
 VIDEO_OUTPUT_DIR = Path("test-videos/output")
 INPUT_VIDEOS = [
-    VIDEO_INPUT_DIR / "mona-lisa.avi",
+    # VIDEO_INPUT_DIR / "mona-lisa.avi",
     # VIDEO_INPUT_DIR / "mona-lisa-blur.avi",
     # VIDEO_INPUT_DIR / "mona-lisa-blur-extra-credit.avi",
-    # VIDEO_INPUT_DIR / "simple_track.avi",
+    VIDEO_INPUT_DIR / "video.MOV",
 ]
 VIDEO_CODEC = "mp4v"
 SIFT_FEATURES = 1000
