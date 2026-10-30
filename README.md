@@ -75,6 +75,7 @@ SIFT позволяет находить признаки, устойчивые 
 
 <!-- TRACKING TABLE END -->
 
+<!--
 | mona-lisa.avi                            | mona-lisa-blur.avi                            |
 |------------------------------------------|-----------------------------------------------|
 | ![](./docs/images/tracked_mona-lisa.gif) | ![](./docs/images/tracked_mona-lisa-blur.gif) |
@@ -82,6 +83,7 @@ SIFT позволяет находить признаки, устойчивые 
 | mona-lisa-blur-extra-credit.avi                            | video.mov                            |
 |------------------------------------------------------------|--------------------------------------|
 | ![](./docs/images/tracked_mona-lisa-blur-extra-credit.gif) | ![](./docs/images/tracked_video.gif) |
+-->
 
 ## Выводы по работе
 
